@@ -1,1 +1,82 @@
-// placeholder
+use sqlx::SqlitePool;
+use std::sync::Arc;
+
+use crate::error::AppError;
+use crate::models::file::{IndexedFile, Library, PaginatedResponse};
+use crate::modules::library::scanner::{self, ScanState};
+
+pub async fn trigger_scan(pool: &SqlitePool, library_id: i64, scan_state: Arc<ScanState>) -> Result<(), AppError> {
+    let library = sqlx::query_as!(Library, "SELECT * FROM libraries WHERE id = ?", library_id)
+        .fetch_optional(pool)
+        .await
+        .map_err(|e| AppError::Internal(e.to_string()))?
+        .ok_or(AppError::NotFound("library not found".into()))?;
+
+    let pool_clone = pool.clone();
+    tokio::spawn(async move {
+        if let Err(e) = scanner::scan_library(&pool_clone, &library, scan_state).await {
+            tracing::error!("scan error: {}", e);
+        }
+    });
+
+    Ok(())
+}
+
+pub fn get_scan_state(scan_state: &Arc<ScanState>) -> serde_json::Value {
+    serde_json::json!({
+        "status": *scan_state.status.lock(),
+        "total": scan_state.total.load(std::sync::atomic::Ordering::SeqCst),
+        "processed": scan_state.processed.load(std::sync::atomic::Ordering::SeqCst),
+        "current_file": *scan_state.current_file.lock(),
+    })
+}
+
+pub async fn list_movies(pool: &SqlitePool, cursor: Option<String>, page_size: i64) -> Result<PaginatedResponse<IndexedFile>, AppError> {
+    let offset: i64 = cursor.and_then(|c| c.parse().ok()).unwrap_or(0);
+    let items = sqlx::query_as!(
+        IndexedFile,
+        "SELECT * FROM indexed_files WHERE file_type = 'video' ORDER BY title LIMIT ? OFFSET ?",
+        page_size + 1,
+        offset
+    )
+    .fetch_all(pool)
+    .await
+    .map_err(|e| AppError::Internal(e.to_string()))?;
+
+    let total = sqlx::query_scalar!("SELECT COUNT(*) FROM indexed_files WHERE file_type = 'video'")
+        .fetch_one(pool)
+        .await
+        .map_err(|e| AppError::Internal(e.to_string()))?;
+
+    let has_more = items.len() > page_size as usize;
+    let items = if has_more { items[..items.len() - 1].to_vec() } else { items };
+
+    Ok(PaginatedResponse {
+        next_cursor: if has_more { Some((offset + page_size).to_string()) } else { None },
+        total,
+        items,
+    })
+}
+
+pub async fn list_series(pool: &SqlitePool) -> Result<Vec<crate::models::series::Series>, AppError> {
+    sqlx::query_as!(crate::models::series::Series, "SELECT * FROM series ORDER BY title")
+        .fetch_all(pool)
+        .await
+        .map_err(|e| AppError::Internal(e.to_string()))
+}
+
+pub async fn get_media_detail(pool: &SqlitePool, id: i64) -> Result<IndexedFile, AppError> {
+    sqlx::query_as!(IndexedFile, "SELECT * FROM indexed_files WHERE id = ?", id)
+        .fetch_optional(pool)
+        .await
+        .map_err(|e| AppError::Internal(e.to_string()))?
+        .ok_or(AppError::NotFound("media not found".into()))
+}
+
+pub async fn search_media(pool: &SqlitePool, q: &str) -> Result<Vec<IndexedFile>, AppError> {
+    let pattern = format!("%{}%", q);
+    sqlx::query_as!(IndexedFile, "SELECT * FROM indexed_files WHERE title LIKE ? AND file_type = 'video' LIMIT 50", pattern)
+        .fetch_all(pool)
+        .await
+        .map_err(|e| AppError::Internal(e.to_string()))
+}
