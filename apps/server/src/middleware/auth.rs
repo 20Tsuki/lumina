@@ -16,15 +16,12 @@ pub struct AuthClaims {
     pub role: String,
 }
 
-impl<S> FromRequestParts<S> for AuthClaims
-where
-    S: Send + Sync,
-{
+impl FromRequestParts<Arc<AppState>> for AuthClaims {
     type Rejection = (StatusCode, Json<serde_json::Value>);
 
     async fn from_request_parts(
         parts: &mut Parts,
-        _state: &S,
+        state: &Arc<AppState>,
     ) -> Result<Self, Self::Rejection> {
         let header = parts
             .headers
@@ -37,13 +34,6 @@ where
                     Json(json!({"error": {"code": "UNAUTHORIZED", "message": "missing token"}})),
                 )
             })?;
-
-        let state = parts.extensions.get::<Arc<AppState>>().ok_or_else(|| {
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": {"code": "INTERNAL", "message": "state missing"}})),
-            )
-        })?;
 
         let claims = service::verify_token(header, &state.config.jwt_secret()).map_err(
             |_| {
