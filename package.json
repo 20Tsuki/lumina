@@ -1,0 +1,13 @@
+{
+  "name": "lumina",
+  "private": true,
+  "scripts": {
+    "dev": "pnpm --filter @lumina/web dev & cargo run --manifest-path apps/server/Cargo.toml",
+    "build": "pnpm --filter @lumina/web build && cargo build --manifest-path apps/server/Cargo.toml --release",
+    "lint": "pnpm --filter @lumina/web lint && cargo clippy --manifest-path apps/server/Cargo.toml"
+  },
+  "engines": {
+    "node": ">=20",
+    "pnpm": ">=9"
+  }
+}
