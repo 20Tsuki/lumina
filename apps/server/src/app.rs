@@ -12,6 +12,7 @@ pub struct AppState {
     pub config: Config,
     pub pool: SqlitePool,
     pub scan_state: Arc<ScanState>,
+    #[allow(dead_code)]
     pub download_state: Arc<DownloadState>,
 }
 
@@ -71,21 +72,21 @@ fn media_routes() -> Router<Arc<AppState>> {
         .route("/series", axum::routing::get(crate::modules::library::handler::series_list))
         .route("/search", axum::routing::get(crate::modules::library::handler::search))
         .route("/{id}", axum::routing::get(crate::modules::library::handler::media_detail))
-        .route("/:id/refresh", axum::routing::post(crate::modules::library::handler::refresh))
+        .route("/{id}/refresh", axum::routing::post(crate::modules::library::handler::refresh))
 }
 
 fn stream_routes() -> Router<Arc<AppState>> {
     Router::new()
-        .route("/:id/file", axum::routing::get(crate::modules::stream::handler::serve_file))
+        .route("/{id}/file", axum::routing::get(crate::modules::stream::handler::serve_file))
 }
 
 fn download_routes() -> Router<Arc<AppState>> {
     Router::new()
         .route("/add", axum::routing::post(crate::modules::download::handler::add))
         .route("/list", axum::routing::get(crate::modules::download::handler::list))
-        .route("/:id/pause", axum::routing::post(crate::modules::download::handler::pause))
-        .route("/:id/resume", axum::routing::post(crate::modules::download::handler::resume))
-        .route("/:id/remove", axum::routing::post(crate::modules::download::handler::remove))
+        .route("/{id}/pause", axum::routing::post(crate::modules::download::handler::pause))
+        .route("/{id}/resume", axum::routing::post(crate::modules::download::handler::resume))
+        .route("/{id}/remove", axum::routing::post(crate::modules::download::handler::remove))
         .route("/progress", axum::routing::get(crate::modules::download::handler::progress_sse))
 }
 

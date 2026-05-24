@@ -62,19 +62,19 @@ pub async fn me(
     State(state): State<Arc<AppState>>,
     claims: crate::middleware::auth::AuthClaims,
 ) -> Result<Json<crate::models::user::UserInfo>, AppError> {
-    let user = sqlx::query_as::<_, crate::models::user::UserRow>(
-        "SELECT id, username, password_hash, role, created_at FROM users WHERE id = ?",
+    let created_at = sqlx::query_scalar::<_, i64>(
+        "SELECT created_at FROM users WHERE id = ?",
     )
     .bind(claims.user_id)
     .fetch_optional(&state.pool)
     .await
     .map_err(|e| AppError::Internal(e.to_string()))?
-    .ok_or(AppError::NotFound("user not found".into()))?;
+    .unwrap_or(0);
 
     Ok(Json(crate::models::user::UserInfo {
-        id: user.id,
-        username: user.username,
-        role: user.role,
-        created_at: user.created_at,
+        id: claims.user_id,
+        username: claims.username,
+        role: claims.role,
+        created_at,
     }))
 }

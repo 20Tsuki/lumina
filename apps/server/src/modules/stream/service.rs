@@ -117,13 +117,16 @@ fn parse_range(range_str: &str, file_size: u64) -> Option<(u64, u64)> {
     Some((start, end))
 }
 
+#[allow(dead_code)]
 #[async_trait::async_trait]
 pub trait TranscodeService: Send + Sync {
     async fn transcode(&self, input: &Path, format: &str) -> Result<PathBuf, AppError>;
 }
 
+#[allow(dead_code)]
 pub struct NoopTranscode;
 
+#[allow(dead_code)]
 #[async_trait::async_trait]
 impl TranscodeService for NoopTranscode {
     async fn transcode(&self, _input: &Path, _format: &str) -> Result<PathBuf, AppError> {

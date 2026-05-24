@@ -1,18 +1,14 @@
 use sqlx::SqlitePool;
 use std::sync::Arc;
-use tokio::sync::broadcast;
 
 use crate::error::AppError;
 use crate::models::download::{AddDownloadRequest, DownloadTask};
 
-pub struct DownloadState {
-    pub tx: broadcast::Sender<Vec<DownloadTask>>,
-}
+pub struct DownloadState;
 
 impl DownloadState {
     pub fn new() -> Arc<Self> {
-        let (tx, _) = broadcast::channel(100);
-        Arc::new(Self { tx })
+        Arc::new(Self)
     }
 }
 

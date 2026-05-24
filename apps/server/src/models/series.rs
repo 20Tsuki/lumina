@@ -11,6 +11,7 @@ pub struct Series {
     pub tmdb_id: Option<i64>,
 }
 
+#[allow(dead_code)]
 #[derive(FromRow, Serialize)]
 pub struct Season {
     pub id: i64,
@@ -18,6 +19,7 @@ pub struct Season {
     pub season_number: i64,
 }
 
+#[allow(dead_code)]
 #[derive(FromRow, Serialize)]
 pub struct Episode {
     pub id: i64,
@@ -27,6 +29,7 @@ pub struct Episode {
     pub file_id: Option<i64>,
 }
 
+#[allow(dead_code)]
 #[derive(Serialize)]
 pub struct SeriesDetail {
     pub id: i64,
@@ -37,6 +40,7 @@ pub struct SeriesDetail {
     pub seasons: Vec<SeasonDetail>,
 }
 
+#[allow(dead_code)]
 #[derive(Serialize)]
 pub struct SeasonDetail {
     pub id: i64,
