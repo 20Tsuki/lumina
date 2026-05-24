@@ -1,0 +1,13 @@
+services:
+  server:
+    build:
+      context: .
+      dockerfile: apps/server/Dockerfile
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./apps/server/data:/data
+      - ./media:/media
+    environment:
+      - RUST_LOG=info
+      - LUMINA_CONFIG=/etc/lumina/config.toml
