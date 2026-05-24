@@ -70,7 +70,7 @@ fn media_routes() -> Router<Arc<AppState>> {
         .route("/movies", axum::routing::get(crate::modules::library::handler::movies))
         .route("/series", axum::routing::get(crate::modules::library::handler::series_list))
         .route("/search", axum::routing::get(crate::modules::library::handler::search))
-        .route("/:id", axum::routing::get(crate::modules::library::handler::media_detail))
+        .route("/{id}", axum::routing::get(crate::modules::library::handler::media_detail))
         .route("/:id/refresh", axum::routing::post(crate::modules::library::handler::refresh))
 }
 
