@@ -98,7 +98,8 @@ fn walk_dir(root: &Path, dir: &Path, files: &mut Vec<(String, i64)>) -> Result<(
         if metadata.is_dir() {
             walk_dir(root, &entry.path(), files)?;
         } else {
-            let relative = entry.path().strip_prefix(root).unwrap_or(&entry.path());
+            let entry_path = entry.path();
+            let relative = entry_path.strip_prefix(root).unwrap_or(&entry_path);
             files.push((relative.to_string_lossy().to_string(), metadata.len() as i64));
         }
     }

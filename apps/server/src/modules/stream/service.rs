@@ -15,19 +15,22 @@ pub struct FileRange {
 }
 
 pub async fn prepare_range(pool: &sqlx::SqlitePool, id: i64) -> Result<FileRange, AppError> {
-    let media = sqlx::query_as!(IndexedFile, "SELECT * FROM indexed_files WHERE id = ?", id)
-        .fetch_optional(pool)
-        .await
-        .map_err(|e| AppError::Internal(e.to_string()))?
-        .ok_or(AppError::NotFound("file not found".into()))?;
+    let media =
+        sqlx::query_as::<_, IndexedFile>("SELECT * FROM indexed_files WHERE id = ?")
+            .bind(id)
+            .fetch_optional(pool)
+            .await
+            .map_err(|e| AppError::Internal(e.to_string()))?
+            .ok_or(AppError::NotFound("file not found".into()))?;
 
-    let lib = sqlx::query!("SELECT path FROM libraries WHERE id = ?", media.library_id)
+    let lib = sqlx::query_as::<_, (String,)>( "SELECT path FROM libraries WHERE id = ?")
+        .bind(media.library_id)
         .fetch_optional(pool)
         .await
         .map_err(|e| AppError::Internal(e.to_string()))?
         .ok_or(AppError::NotFound("library not found".into()))?;
 
-    let full_path = Path::new(&lib.path).join(&media.file_path);
+    let full_path = Path::new(&lib.0).join(&media.file_path);
     let metadata = tokio::fs::metadata(&full_path)
         .await
         .map_err(|e| AppError::NotFound(format!("file: {}", e)))?;
@@ -48,7 +51,7 @@ pub async fn serve_range(
     range_header: Option<&str>,
 ) -> Result<Response, AppError> {
     use std::io::SeekFrom;
-    use tokio::io::AsyncReadExt;
+    use tokio::io::{AsyncReadExt, AsyncSeekExt};
 
     let mut file = tokio::fs::File::open(&file_range.path)
         .await
@@ -84,7 +87,6 @@ pub async fn serve_range(
         }
     }
 
-    // Full file response
     let stream = tokio_util::io::ReaderStream::new(file);
     Ok(Response::builder()
         .status(StatusCode::OK)

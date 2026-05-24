@@ -32,7 +32,8 @@ pub async fn add_task(
     .await
     .map_err(|e| AppError::Internal(e.to_string()))?;
 
-    let task = sqlx::query_as!(DownloadTask, "SELECT * FROM download_tasks WHERE id = ?", id)
+    let task = sqlx::query_as::<_, DownloadTask>("SELECT * FROM download_tasks WHERE id = ?")
+        .bind(id)
         .fetch_one(pool)
         .await
         .map_err(|e| AppError::Internal(e.to_string()))?;
@@ -45,17 +46,15 @@ pub async fn list_tasks(
     status: Option<&str>,
 ) -> Result<Vec<DownloadTask>, AppError> {
     let tasks = if let Some(s) = status {
-        sqlx::query_as!(
-            DownloadTask,
+        sqlx::query_as::<_, DownloadTask>(
             "SELECT * FROM download_tasks WHERE status = ? ORDER BY created_at DESC",
-            s
         )
+        .bind(s)
         .fetch_all(pool)
         .await
     } else {
-        sqlx::query_as!(
-            DownloadTask,
-            "SELECT * FROM download_tasks ORDER BY created_at DESC"
+        sqlx::query_as::<_, DownloadTask>(
+            "SELECT * FROM download_tasks ORDER BY created_at DESC",
         )
         .fetch_all(pool)
         .await

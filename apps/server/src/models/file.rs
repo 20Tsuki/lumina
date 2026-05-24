@@ -1,7 +1,7 @@
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use sqlx::FromRow;
 
-#[derive(FromRow, Serialize)]
+#[derive(FromRow, Serialize, Clone)]
 pub struct IndexedFile {
     pub id: i64,
     pub library_id: i64,

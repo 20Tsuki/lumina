@@ -37,14 +37,16 @@ pub fn get_system_info() -> serde_json::Value {
 }
 
 pub async fn get_settings(pool: &SqlitePool) -> Result<serde_json::Value, AppError> {
-    let rows = sqlx::query!("SELECT key, value FROM settings")
+    let rows = sqlx::query_as::<_, (Option<String>, String)>("SELECT key, value FROM settings")
         .fetch_all(pool)
         .await
         .map_err(|e| AppError::Internal(e.to_string()))?;
 
     let mut map = serde_json::Map::new();
-    for row in rows {
-        map.insert(row.key, serde_json::Value::String(row.value));
+    for (key, value) in rows {
+        if let Some(k) = key {
+            map.insert(k, serde_json::Value::String(value));
+        }
     }
     Ok(serde_json::Value::Object(map))
 }

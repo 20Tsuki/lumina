@@ -22,11 +22,10 @@ pub async fn login(
     State(state): State<Arc<AppState>>,
     Json(req): Json<LoginRequest>,
 ) -> Result<Json<LoginResponse>, AppError> {
-    let user = sqlx::query_as!(
-        crate::models::user::UserRow,
+    let user = sqlx::query_as::<_, crate::models::user::UserRow>(
         "SELECT id, username, password_hash, role, created_at FROM users WHERE username = ?",
-        req.username
     )
+    .bind(&req.username)
     .fetch_optional(&state.pool)
     .await
     .map_err(|e| AppError::Internal(e.to_string()))?
@@ -36,7 +35,13 @@ pub async fn login(
         return Err(AppError::Unauthorized("invalid credentials".into()));
     }
 
-    let token = service::create_token(user.id, &user.username, &user.role, &state.config.jwt_secret(), state.config.jwt_expiry_hours())?;
+    let token = service::create_token(
+        user.id,
+        &user.username,
+        &user.role,
+        &state.config.jwt_secret(),
+        state.config.jwt_expiry_hours(),
+    )?;
 
     Ok(Json(LoginResponse {
         token,
@@ -57,11 +62,10 @@ pub async fn me(
     State(state): State<Arc<AppState>>,
     claims: crate::middleware::auth::AuthClaims,
 ) -> Result<Json<crate::models::user::UserInfo>, AppError> {
-    let user = sqlx::query_as!(
-        crate::models::user::UserRow,
+    let user = sqlx::query_as::<_, crate::models::user::UserRow>(
         "SELECT id, username, password_hash, role, created_at FROM users WHERE id = ?",
-        claims.user_id
     )
+    .bind(claims.user_id)
     .fetch_optional(&state.pool)
     .await
     .map_err(|e| AppError::Internal(e.to_string()))?

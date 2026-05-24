@@ -2,8 +2,6 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::UNIX_EPOCH;
 
-use image::GenericImageView;
-
 use crate::error::AppError;
 use crate::models::file::FileEntry;
 

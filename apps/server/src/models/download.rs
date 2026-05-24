@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use sqlx::FromRow;
 
-#[derive(FromRow, Serialize)]
+#[derive(FromRow, Serialize, Clone)]
 pub struct DownloadTask {
     pub id: i64,
     pub url: String,

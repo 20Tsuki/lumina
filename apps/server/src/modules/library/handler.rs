@@ -11,7 +11,7 @@ pub async fn scan(
     State(state): State<Arc<AppState>>,
     _claims: crate::middleware::auth::AuthClaims,
 ) -> Result<Json<serde_json::Value>, AppError> {
-    let libraries = sqlx::query_as!(crate::models::file::Library, "SELECT * FROM libraries")
+    let libraries = sqlx::query_as::<_, crate::models::file::Library>("SELECT * FROM libraries")
         .fetch_all(&state.pool)
         .await
         .map_err(|e| AppError::Internal(e.to_string()))?;

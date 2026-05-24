@@ -60,7 +60,7 @@ pub fn verify_token(token: &str, secret: &str) -> Result<Claims, AppError> {
 }
 
 pub async fn create_user(pool: &SqlitePool, username: &str, password: &str, role: &str) -> Result<i64, AppError> {
-    let hash = hash_password(password)?;
+    let hash = hash_password(password).await?;
     let now = Utc::now().timestamp_millis();
     let id = sqlx::query_scalar::<_, i64>(
         "INSERT INTO users (username, password_hash, role, created_at) VALUES (?, ?, ?, ?) RETURNING id"

@@ -1,7 +1,7 @@
 use axum::{
     body::Body,
     extract::{Multipart, Query, State},
-    http::{header, StatusCode},
+    http::header,
     response::IntoResponse,
     Json,
 };
@@ -29,7 +29,7 @@ pub async fn list(
     Ok(Json(entries))
 }
 
-fn get_media_root(state: &Arc<AppState>) -> PathBuf {
+fn get_media_root(_state: &Arc<AppState>) -> PathBuf {
     PathBuf::from("/")
 }
 
@@ -97,7 +97,7 @@ pub async fn upload(
         if name == "file" {
             let file_name = field.file_name().unwrap_or("unnamed").to_string();
             let data = field.bytes().await.map_err(|e| AppError::Internal(e.to_string()))?;
-            let target = PathBuf::from(&dest_path).join(&file_name);
+            let _target = PathBuf::from(&dest_path).join(&file_name);
             let resolved = if dest_path == "/" { root.join(&file_name) } else { root.join(dest_path.trim_start_matches('/')).join(&file_name) };
             fs::write(&resolved, &data).await.map_err(|e| AppError::Internal(e.to_string()))?;
             return Ok(Json(serde_json::json!({"ok": true, "path": format!("/{}", file_name)})));
