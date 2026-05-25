@@ -1,5 +1,5 @@
-import { useState } from "react";
-import { useFiles } from "@/hooks/useFiles";
+import { useState, useEffect, useCallback } from "react";
+import { getToken } from "@/lib/api";
 import type { FileEntry } from "@lumina/shared";
 
 interface FolderPickerProps {
@@ -11,9 +11,41 @@ interface FolderPickerProps {
 export default function FolderPicker({ value, onChange, placeholder }: FolderPickerProps) {
   const [open, setOpen] = useState(false);
   const [currentPath, setCurrentPath] = useState("/");
-  const { data: entries, isLoading } = useFiles(currentPath);
+  const [entries, setEntries] = useState<FileEntry[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
 
-  const dirs = (entries ?? []).filter((f: FileEntry) => f.is_dir);
+  const fetchDir = useCallback(async (path: string) => {
+    setLoading(true);
+    setError("");
+    try {
+      const token = getToken();
+      const headers: Record<string, string> = {};
+      if (token) headers["Authorization"] = `Bearer ${token}`;
+
+      const res = await fetch(`/api/files/list?path=${encodeURIComponent(path)}`, { headers });
+      if (!res.ok) {
+        const err = await res.json().catch(() => null);
+        throw new Error(err?.error?.message ?? `HTTP ${res.status}`);
+      }
+      const data: FileEntry[] = await res.json();
+      setEntries(data);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "加载失败");
+      setEntries([]);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  // Fetch whenever currentPath changes while modal is open
+  useEffect(() => {
+    if (open) {
+      fetchDir(currentPath);
+    }
+  }, [open, currentPath, fetchDir]);
+
+  const dirs = entries.filter((f) => f.is_dir);
 
   function openPicker() {
     setCurrentPath(value || "/");
@@ -76,8 +108,10 @@ export default function FolderPicker({ value, onChange, placeholder }: FolderPic
             </div>
 
             <div className="flex-1 overflow-y-auto border rounded mb-3 min-h-[200px]">
-              {isLoading ? (
+              {loading ? (
                 <div className="p-4 text-sm text-gray-400">加载中...</div>
+              ) : error ? (
+                <div className="p-4 text-sm text-red-500">{error}</div>
               ) : dirs.length === 0 ? (
                 <div className="p-4 text-sm text-gray-400">此目录下没有子文件夹</div>
               ) : (
@@ -90,7 +124,7 @@ export default function FolderPicker({ value, onChange, placeholder }: FolderPic
                       📁 ..
                     </button>
                   )}
-                  {dirs.map((d: FileEntry) => (
+                  {dirs.map((d) => (
                     <button
                       key={d.path}
                       onClick={() => navigateTo(d)}
