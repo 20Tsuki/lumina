@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useMovies, useSearch, useScanTrigger, useScanStatus, useLibraries, useCreateLibrary, useDeleteLibrary } from "@/hooks/useMedia";
 import type { IndexedFile, Library } from "@lumina/shared";
+import FolderPicker from "@/components/FolderPicker";
 
 function formatDuration(seconds: number | null | undefined): string {
   if (!seconds) return "";
@@ -204,13 +205,7 @@ export default function MediaLibrary() {
               </div>
               <div>
                 <label className="block text-sm text-gray-600 mb-1">文件夹路径</label>
-                <input
-                  type="text"
-                  value={newLibPath}
-                  onChange={(e) => setNewLibPath(e.target.value)}
-                  placeholder="例如：/Volumes/媒体/电影"
-                  className="w-full border rounded px-3 py-2 text-sm"
-                />
+                <FolderPicker value={newLibPath} onChange={setNewLibPath} placeholder="例如：/Volumes/媒体/电影" />
               </div>
               <div>
                 <label className="block text-sm text-gray-600 mb-1">类型</label>

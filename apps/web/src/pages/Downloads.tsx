@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import type { DownloadTask } from "@lumina/shared";
+import FolderPicker from "@/components/FolderPicker";
 
 export default function Downloads() {
   const qc = useQueryClient();
@@ -63,13 +64,9 @@ export default function Downloads() {
           onChange={(e) => setUrl(e.target.value)}
           className="border rounded px-3 py-1 text-sm flex-1"
         />
-        <input
-          type="text"
-          placeholder="保存路径"
-          value={savePath}
-          onChange={(e) => setSavePath(e.target.value)}
-          className="border rounded px-3 py-1 text-sm w-40"
-        />
+        <div className="w-64">
+          <FolderPicker value={savePath} onChange={setSavePath} placeholder="保存路径" />
+        </div>
         <button
           type="submit"
           className="px-3 py-1 bg-blue-600 text-white rounded text-sm"
