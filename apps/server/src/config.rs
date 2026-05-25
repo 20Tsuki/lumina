@@ -25,6 +25,8 @@ pub struct DataConfig {
     pub db_path: PathBuf,
     #[serde(default = "default_thumbnail_dir")]
     pub thumbnail_dir: PathBuf,
+    #[serde(default = "default_download_dir")]
+    pub download_dir: PathBuf,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -39,6 +41,7 @@ fn default_host() -> String { "0.0.0.0".into() }
 fn default_port() -> u16 { 8080 }
 fn default_db_path() -> PathBuf { PathBuf::from("data/lumina.db") }
 fn default_thumbnail_dir() -> PathBuf { PathBuf::from("data/thumbnails") }
+fn default_download_dir() -> PathBuf { PathBuf::from("data/downloads") }
 fn default_jwt_secret() -> String { "change-me-in-production".into() }
 fn default_jwt_expiry() -> u32 { 24 }
 
@@ -46,6 +49,7 @@ impl Config {
     pub fn server_addr(&self) -> String { format!("{}:{}", self.server.host, self.server.port) }
     pub fn db_path(&self) -> &PathBuf { &self.data.db_path }
     pub fn thumbnail_dir(&self) -> &PathBuf { &self.data.thumbnail_dir }
+    pub fn download_dir(&self) -> &PathBuf { &self.data.download_dir }
     pub fn jwt_secret(&self) -> &str { &self.auth.jwt_secret }
     pub fn jwt_expiry_hours(&self) -> u32 { self.auth.jwt_expiry_hours }
 }
@@ -81,7 +85,7 @@ impl Default for ServerConfig {
 }
 
 impl Default for DataConfig {
-    fn default() -> Self { DataConfig { db_path: default_db_path(), thumbnail_dir: default_thumbnail_dir() } }
+    fn default() -> Self { DataConfig { db_path: default_db_path(), thumbnail_dir: default_thumbnail_dir(), download_dir: default_download_dir() } }
 }
 
 impl Default for AuthConfig {

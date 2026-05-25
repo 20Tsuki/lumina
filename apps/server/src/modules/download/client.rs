@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::path::Path;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
@@ -8,18 +9,17 @@ use tokio::fs;
 use tokio::io::AsyncWriteExt;
 
 use crate::models::download::DownloadTask;
-use crate::modules::download::aria2::Aria2Manager;
+use crate::modules::download::bittorrent::BtManager;
+use librqbit::TorrentStatsState;
 use crate::modules::download::service;
 
 pub async fn run_worker(pool: SqlitePool, state: Arc<service::DownloadState>) {
-    // Spawn aria2 progress sync if aria2 is available
-    if state.aria2.is_available() {
-        let sync_pool = pool.clone();
-        let sync_state = state.clone();
-        tokio::spawn(async move {
-            aria2_progress_sync(sync_pool, sync_state).await;
-        });
-    }
+    // Spawn BT progress sync loop (always available since librqbit is built-in)
+    let sync_pool = pool.clone();
+    let sync_state = state.clone();
+    tokio::spawn(async move {
+        bt_progress_sync(sync_pool, sync_state).await;
+    });
 
     loop {
         let task = sqlx::query_as::<_, DownloadTask>(
@@ -30,10 +30,8 @@ pub async fn run_worker(pool: SqlitePool, state: Arc<service::DownloadState>) {
 
         match task {
             Ok(Some(task)) => {
-                if state.aria2.is_available() {
-                    download_via_aria2(&pool, &state, task).await;
-                } else if Aria2Manager::is_magnet_or_torrent(&task.url) {
-                    let _ = service::fail_task(&pool, task.id, "aria2 not available — install aria2c for BT/magnet support").await;
+                if BtManager::is_magnet_or_torrent(&task.url) {
+                    download_via_bt(&pool, &state, task).await;
                 } else {
                     download_via_http(&pool, &state, task).await;
                 }
@@ -45,59 +43,128 @@ pub async fn run_worker(pool: SqlitePool, state: Arc<service::DownloadState>) {
     }
 }
 
-async fn download_via_aria2(
+async fn download_via_bt(
     pool: &SqlitePool,
-    state: &service::DownloadState,
+    state: &Arc<service::DownloadState>,
     task: DownloadTask,
 ) {
+    // Mark as "connecting" while resolving magnet metadata via DHT
     let now = chrono::Utc::now().timestamp_millis();
     let _ = sqlx::query(
-        "UPDATE download_tasks SET status = 'downloading', updated_at = ? WHERE id = ?",
+        "UPDATE download_tasks SET status = 'connecting', updated_at = ? WHERE id = ?",
     )
     .bind(now)
     .bind(task.id)
     .execute(pool)
     .await;
 
-    match state.aria2.add_uri(&task.url, &task.save_path).await {
-        Ok(gid) => {
-            state.aria2.gid_map.lock().await.insert(task.id, gid);
-            tracing::info!(task_id = task.id, "aria2 download started");
-        }
-        Err(e) => {
-            tracing::error!(task_id = task.id, %e, "aria2 add_uri failed");
-            let _ = service::fail_task(pool, task.id, &e).await;
+    // Spawn metadata resolution in background — resolve_magnet() can take minutes.
+    // Append well-known trackers to magnet links so metadata resolution works even
+    // when DHT is unreachable (common on macOS due to IPv6-mapped IPv4 issues).
+    let bt = state.bt.clone();
+    let bt_state = state.clone();
+    let task_id = task.id;
+    let mut url = task.url.clone();
+    let save_path = task.save_path.clone();
+    let bg_pool = pool.clone();
+
+    if url.starts_with("magnet:") && !url.contains("&tr=") {
+        for tr in &[
+            "udp://tracker.opentrackr.org:1337/announce",
+            "udp://tracker.openbittorrent.com:6969/announce",
+            "udp://tracker.torrent.eu.org:451/announce",
+            "http://tracker.opentrackr.org:1337/announce",
+        ] {
+            url.push_str("&tr=");
+            url.push_str(&urlencoding::encode(tr));
         }
     }
+
+    tokio::spawn(async move {
+        tracing::debug!(task_id, url = %url, "BT add_torrent: resolving magnet metadata (may take a while)...");
+        match tokio::time::timeout(
+            std::time::Duration::from_secs(120),
+            bt.add_torrent(&url, &save_path),
+        )
+        .await
+        {
+            Ok(Ok(torrent_id)) => {
+                bt_state.bt.torrent_map.lock().await.insert(task_id, torrent_id);
+                let now = chrono::Utc::now().timestamp_millis();
+                let _ = sqlx::query(
+                    "UPDATE download_tasks SET status = 'downloading', updated_at = ? WHERE id = ?",
+                )
+                .bind(now)
+                .bind(task_id)
+                .execute(&bg_pool)
+                .await;
+                tracing::info!(task_id, torrent_id, "BT metadata resolved, downloading");
+            }
+            Ok(Err(e)) => {
+                tracing::error!(task_id, %e, "BT add_torrent failed");
+                let _ = service::fail_task(&bg_pool, task_id, &e).await;
+            }
+            Err(_) => {
+                tracing::error!(task_id, "BT add_torrent timed out after 120s");
+                let _ = service::fail_task(&bg_pool, task_id, "metadata resolution timed out — no peers found for this magnet link").await;
+            }
+        }
+    });
 }
 
-/// Background loop: poll aria2 statuses and sync to DB
-async fn aria2_progress_sync(pool: SqlitePool, state: Arc<service::DownloadState>) {
+/// Background loop: poll librqbit torrent stats and sync to DB
+async fn bt_progress_sync(pool: SqlitePool, state: Arc<service::DownloadState>) {
     loop {
         tokio::time::sleep(std::time::Duration::from_secs(2)).await;
 
-        let gid_map = state.aria2.gid_map.lock().await.clone();
-        if gid_map.is_empty() {
+        let torrent_map = state.bt.torrent_map.lock().await.clone();
+        if torrent_map.is_empty() {
             continue;
         }
 
-        // Poll active, waiting, stopped
-        let active = state.aria2.tell_active().await.unwrap_or_default();
-        let waiting = state.aria2.tell_waiting().await.unwrap_or_default();
+        // Build reverse map: torrent_id → task_id
+        let reverse: HashMap<usize, i64> =
+            torrent_map.iter().map(|(task_id, torrent_id)| (*torrent_id, *task_id)).collect();
 
-        let all: Vec<_> = active.into_iter().chain(waiting).collect();
+        let all = state.bt.get_all_torrents();
 
-        for (task_id, gid) in &gid_map {
-            if let Some(status) = all.iter().find(|s| &s.gid == gid) {
-                let s = status;
-                let progress = s.progress();
-                let speed = s.speed_bytes();
-                let size = s.total_bytes();
-                let eta = s.eta();
-                let mapped = s.mapped_status();
+        for (torrent_id, stats, name) in &all {
+            if let Some(task_id) = reverse.get(torrent_id) {
+                let total = stats.total_bytes;
+                let downloaded = stats.progress_bytes;
+                let state_label = stats.state.to_string();
 
-                // Update file_name from aria2
-                if let Some(ref name) = s.file_name() {
+                tracing::debug!(
+                    task_id,
+                    torrent_id,
+                    state = %state_label,
+                    total,
+                    downloaded,
+                    finished = stats.finished,
+                    error = ?stats.error,
+                    name = ?name,
+                    "BT torrent status"
+                );
+
+                let progress = if total > 0 {
+                    (downloaded as f64 / total as f64) * 100.0
+                } else {
+                    0.0
+                };
+
+                let speed: i64 = stats
+                    .live
+                    .as_ref()
+                    .map(|l| (l.download_speed.mbps * 1_048_576.0) as i64)
+                    .unwrap_or(0);
+                let eta: i64 = if speed > 0 && total > downloaded {
+                    ((total - downloaded) / speed as u64) as i64
+                } else {
+                    0
+                };
+
+                // Update file_name from torrent metadata
+                if let Some(ref name) = name {
                     let now = chrono::Utc::now().timestamp_millis();
                     let _ = sqlx::query(
                         "UPDATE download_tasks SET file_name = ?, updated_at = ? WHERE id = ? AND file_name IS NULL",
@@ -109,26 +176,43 @@ async fn aria2_progress_sync(pool: SqlitePool, state: Arc<service::DownloadState
                     .await;
                 }
 
-                // Update progress
-                let _ = service::update_progress(&pool, *task_id, progress, speed, size, eta).await;
+                // Reflect actual BT state in DB status
+                let mapped_status = match stats.state {
+                    TorrentStatsState::Initializing => "connecting",
+                    TorrentStatsState::Live => "downloading",
+                    TorrentStatsState::Paused => "paused",
+                    TorrentStatsState::Error => "failed",
+                };
+                let now = chrono::Utc::now().timestamp_millis();
+                let _ = sqlx::query(
+                    "UPDATE download_tasks SET status = ?, updated_at = ? WHERE id = ? AND status != 'completed' AND status != 'failed'",
+                )
+                .bind(mapped_status)
+                .bind(now)
+                .bind(task_id)
+                .execute(&pool)
+                .await;
+
+                let _ = service::update_progress(
+                    &pool,
+                    *task_id,
+                    progress,
+                    speed,
+                    total as i64,
+                    eta,
+                )
+                .await;
 
                 // Handle terminal states
-                if mapped == "completed" || mapped == "failed" {
-                    if mapped == "completed" {
-                        let _ = service::complete_task(&pool, *task_id).await;
-                    } else if let Some(ref err) = s.error_message {
-                        let _ = service::fail_task(&pool, *task_id, err).await;
-                    }
-                    // Keep GID for a bit, then clean up
-                }
-
-                // Handle BT metadata phase: if waiting and has followedBy, update GID
-                if s.status == "waiting" && s.followed_by.as_ref().map_or(false, |v| !v.is_empty()) {
-                    if let Some(ref followed) = s.followed_by {
-                        if let Some(new_gid) = followed.first() {
-                            state.aria2.gid_map.lock().await.insert(*task_id, new_gid.clone());
-                        }
-                    }
+                if stats.finished {
+                    let _ = service::complete_task(&pool, *task_id).await;
+                    let _ = state.bt.remove(*torrent_id).await;
+                    state.bt.torrent_map.lock().await.remove(task_id);
+                } else if matches!(stats.state, TorrentStatsState::Error) {
+                    let err = stats.error.clone().unwrap_or_else(|| "unknown error".to_string());
+                    let _ = service::fail_task(&pool, *task_id, &err).await;
+                    let _ = state.bt.remove(*torrent_id).await;
+                    state.bt.torrent_map.lock().await.remove(task_id);
                 }
             }
         }

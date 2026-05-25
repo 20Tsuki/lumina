@@ -6,18 +6,18 @@ use tokio::sync::Mutex;
 
 use crate::error::AppError;
 use crate::models::download::{AddDownloadRequest, DownloadTask};
-use crate::modules::download::aria2::Aria2Manager;
+use crate::modules::download::bittorrent::BtManager;
 
 pub struct DownloadState {
     pub cancel_flags: Arc<Mutex<HashMap<i64, Arc<AtomicBool>>>>,
-    pub aria2: Arc<Aria2Manager>,
+    pub bt: Arc<BtManager>,
 }
 
 impl DownloadState {
-    pub fn new(aria2: Arc<Aria2Manager>) -> Arc<Self> {
+    pub fn new(bt: Arc<BtManager>) -> Arc<Self> {
         Arc::new(Self {
             cancel_flags: Arc::new(Mutex::new(HashMap::new())),
-            aria2,
+            bt,
         })
     }
 

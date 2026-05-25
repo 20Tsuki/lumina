@@ -39,9 +39,9 @@ pub async fn pause(
     State(state): State<Arc<AppState>>,
     Path(id): Path<i64>,
 ) -> Result<Json<serde_json::Value>, AppError> {
-    // If aria2 handles this task, pause via aria2 RPC
-    if let Some(gid) = state.download_state.aria2.gid_map.lock().await.get(&id).cloned() {
-        let _ = state.download_state.aria2.pause(&gid).await;
+    // If BT handles this task, pause via librqbit
+    if let Some(torrent_id) = state.download_state.bt.torrent_map.lock().await.get(&id).cloned() {
+        let _ = state.download_state.bt.pause(torrent_id).await;
     } else {
         state.download_state.cancel_task(id).await;
     }
@@ -53,9 +53,9 @@ pub async fn resume(
     State(state): State<Arc<AppState>>,
     Path(id): Path<i64>,
 ) -> Result<Json<serde_json::Value>, AppError> {
-    // If aria2 handles this task, resume via aria2 RPC
-    if let Some(gid) = state.download_state.aria2.gid_map.lock().await.get(&id).cloned() {
-        let _ = state.download_state.aria2.unpause(&gid).await;
+    // If BT handles this task, resume via librqbit
+    if let Some(torrent_id) = state.download_state.bt.torrent_map.lock().await.get(&id).cloned() {
+        let _ = state.download_state.bt.unpause(torrent_id).await;
     }
     service::resume_task(&state.pool, id).await?;
     Ok(Json(serde_json::json!({"ok": true})))
@@ -65,9 +65,9 @@ pub async fn remove(
     State(state): State<Arc<AppState>>,
     Path(id): Path<i64>,
 ) -> Result<Json<serde_json::Value>, AppError> {
-    // If aria2 handles this task, remove via aria2 RPC
-    if let Some(gid) = state.download_state.aria2.gid_map.lock().await.remove(&id) {
-        let _ = state.download_state.aria2.remove(&gid).await;
+    // If BT handles this task, remove via librqbit
+    if let Some(torrent_id) = state.download_state.bt.torrent_map.lock().await.remove(&id) {
+        let _ = state.download_state.bt.remove(torrent_id).await;
     }
     service::remove_task(&state.pool, id).await?;
     Ok(Json(serde_json::json!({"ok": true})))
