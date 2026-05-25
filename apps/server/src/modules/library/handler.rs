@@ -5,7 +5,7 @@ use std::sync::Arc;
 use crate::app::AppState;
 use crate::error::AppError;
 use crate::modules::library::service;
-use crate::models::file::{IndexedFile, PaginatedResponse};
+use crate::models::file::{IndexedFile, Library, PaginatedResponse};
 
 pub async fn scan(
     State(state): State<Arc<AppState>>,
@@ -85,4 +85,42 @@ pub async fn search(
 ) -> Result<Json<Vec<IndexedFile>>, AppError> {
     let results = service::search_media(&state.pool, &q.q).await?;
     Ok(Json(results))
+}
+
+#[derive(Deserialize)]
+pub struct CreateLibraryRequest {
+    pub name: String,
+    pub path: String,
+    #[serde(default = "default_library_type")]
+    pub library_type: String,
+}
+
+fn default_library_type() -> String {
+    "mixed".into()
+}
+
+pub async fn create_library(
+    State(state): State<Arc<AppState>>,
+    _claims: crate::middleware::auth::AuthClaims,
+    Json(req): Json<CreateLibraryRequest>,
+) -> Result<Json<Library>, AppError> {
+    let library = service::create_library(&state.pool, &req.name, &req.path, &req.library_type).await?;
+    Ok(Json(library))
+}
+
+pub async fn list_libraries(
+    State(state): State<Arc<AppState>>,
+    _claims: crate::middleware::auth::AuthClaims,
+) -> Result<Json<Vec<Library>>, AppError> {
+    let libraries = service::list_libraries(&state.pool).await?;
+    Ok(Json(libraries))
+}
+
+pub async fn delete_library(
+    State(state): State<Arc<AppState>>,
+    _claims: crate::middleware::auth::AuthClaims,
+    Path(id): Path<i64>,
+) -> Result<Json<serde_json::Value>, AppError> {
+    service::delete_library(&state.pool, id).await?;
+    Ok(Json(serde_json::json!({"ok": true})))
 }

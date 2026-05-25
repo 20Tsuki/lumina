@@ -5,6 +5,54 @@ use crate::error::AppError;
 use crate::models::file::{IndexedFile, Library, PaginatedResponse};
 use crate::modules::library::scanner::{self, ScanState};
 
+pub async fn create_library(
+    pool: &SqlitePool,
+    name: &str,
+    path: &str,
+    library_type: &str,
+) -> Result<Library, AppError> {
+    let now = chrono::Utc::now().timestamp_millis();
+    let id = sqlx::query_scalar::<_, i64>(
+        "INSERT INTO libraries (name, path, library_type, created_at) VALUES (?, ?, ?, ?) RETURNING id",
+    )
+    .bind(name)
+    .bind(path)
+    .bind(library_type)
+    .bind(now)
+    .fetch_one(pool)
+    .await
+    .map_err(|e| AppError::Internal(e.to_string()))?;
+
+    let library = sqlx::query_as::<_, Library>("SELECT * FROM libraries WHERE id = ?")
+        .bind(id)
+        .fetch_one(pool)
+        .await
+        .map_err(|e| AppError::Internal(e.to_string()))?;
+
+    Ok(library)
+}
+
+pub async fn list_libraries(pool: &SqlitePool) -> Result<Vec<Library>, AppError> {
+    sqlx::query_as::<_, Library>("SELECT * FROM libraries ORDER BY created_at DESC")
+        .fetch_all(pool)
+        .await
+        .map_err(|e| AppError::Internal(e.to_string()))
+}
+
+pub async fn delete_library(pool: &SqlitePool, id: i64) -> Result<(), AppError> {
+    let affected = sqlx::query("DELETE FROM libraries WHERE id = ?")
+        .bind(id)
+        .execute(pool)
+        .await
+        .map_err(|e| AppError::Internal(e.to_string()))?
+        .rows_affected();
+
+    if affected == 0 {
+        return Err(AppError::NotFound("library not found".into()));
+    }
+    Ok(())
+}
+
 pub async fn trigger_scan(
     pool: &SqlitePool,
     library_id: i64,

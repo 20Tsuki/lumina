@@ -1,6 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api";
-import type { IndexedFile, PaginatedResponse, ScanStatus } from "@lumina/shared";
+import type { IndexedFile, Library, PaginatedResponse, ScanStatus } from "@lumina/shared";
 
 export function useMovies(page: number) {
   return useQuery({
@@ -48,6 +48,39 @@ export function useScanStatus() {
         return 1000;
       }
       return false;
+    },
+  });
+}
+
+export function useLibraries() {
+  return useQuery({
+    queryKey: ["libraries"],
+    queryFn: () => api<Library[]>("/library"),
+  });
+}
+
+export function useCreateLibrary() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: { name: string; path: string; library_type: string }) =>
+      api<Library>("/library", {
+        method: "POST",
+        body: JSON.stringify(body),
+      }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["libraries"] });
+    },
+  });
+}
+
+export function useDeleteLibrary() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: number) =>
+      api<{ ok: boolean }>(`/library/${id}`, { method: "DELETE" }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["libraries"] });
+      qc.invalidateQueries({ queryKey: ["media"] });
     },
   });
 }

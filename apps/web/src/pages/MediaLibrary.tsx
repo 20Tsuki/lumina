@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { useMovies, useSearch, useScanTrigger, useScanStatus } from "@/hooks/useMedia";
-import type { IndexedFile } from "@lumina/shared";
+import { useMovies, useSearch, useScanTrigger, useScanStatus, useLibraries, useCreateLibrary, useDeleteLibrary } from "@/hooks/useMedia";
+import type { IndexedFile, Library } from "@lumina/shared";
 
 function formatDuration(seconds: number | null | undefined): string {
   if (!seconds) return "";
@@ -14,14 +14,36 @@ function formatDuration(seconds: number | null | undefined): string {
 export default function MediaLibrary() {
   const [page, setPage] = useState(1);
   const [search, setSearch] = useState("");
+  const [showAddModal, setShowAddModal] = useState(false);
+  const [newLibName, setNewLibName] = useState("");
+  const [newLibPath, setNewLibPath] = useState("");
+  const [newLibType, setNewLibType] = useState("mixed");
   const { data, isLoading } = useMovies(page);
   const { data: searchResults } = useSearch(search);
   const { data: scanStatus } = useScanStatus();
+  const { data: libraries } = useLibraries();
   const scanTrigger = useScanTrigger();
+  const createLibrary = useCreateLibrary();
+  const deleteLibrary = useDeleteLibrary();
   const navigate = useNavigate();
 
   const items = search ? searchResults : data?.items;
   const isScanning = scanStatus?.status === "scanning";
+
+  function handleCreateLibrary() {
+    if (!newLibName.trim() || !newLibPath.trim()) return;
+    createLibrary.mutate(
+      { name: newLibName.trim(), path: newLibPath.trim(), library_type: newLibType },
+      {
+        onSuccess: () => {
+          setShowAddModal(false);
+          setNewLibName("");
+          setNewLibPath("");
+          setNewLibType("mixed");
+        },
+      }
+    );
+  }
 
   if (isLoading) return <div className="text-sm text-gray-500 p-4">加载中...</div>;
 
@@ -79,6 +101,37 @@ export default function MediaLibrary() {
         </div>
       )}
 
+      <div className="mb-4">
+        <div className="flex items-center gap-2 mb-2">
+          <h3 className="text-sm font-medium text-gray-600">媒体库</h3>
+          <button
+            onClick={() => setShowAddModal(true)}
+            className="text-xs px-2 py-0.5 border rounded hover:bg-gray-100"
+          >
+            添加
+          </button>
+        </div>
+        {libraries && libraries.length > 0 ? (
+          <div className="flex flex-wrap gap-2">
+            {libraries.map((lib: Library) => (
+              <div key={lib.id} className="flex items-center gap-2 px-3 py-1.5 bg-gray-50 rounded text-sm">
+                <span className="font-medium">{lib.name}</span>
+                <span className="text-gray-400 text-xs truncate max-w-[200px]">{lib.path}</span>
+                <span className="text-gray-300 text-xs">({lib.library_type})</span>
+                <button
+                  onClick={() => { if (confirm(`确定要删除媒体库「${lib.name}」吗？`)) deleteLibrary.mutate(lib.id); }}
+                  className="text-red-400 hover:text-red-600 ml-1"
+                >
+                  ×
+                </button>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <p className="text-xs text-gray-400">尚未添加媒体库，请添加文件夹后扫描</p>
+        )}
+      </div>
+
       <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 gap-4">
         {items?.map((movie) => (
           <div
@@ -131,6 +184,63 @@ export default function MediaLibrary() {
           >
             下一页
           </button>
+        </div>
+      )}
+
+      {showAddModal && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50" onClick={() => setShowAddModal(false)}>
+          <div className="bg-white rounded-lg p-6 w-[400px] max-w-[90vw]" onClick={(e) => e.stopPropagation()}>
+            <h3 className="text-lg font-bold mb-4">添加媒体库</h3>
+            <div className="space-y-3">
+              <div>
+                <label className="block text-sm text-gray-600 mb-1">名称</label>
+                <input
+                  type="text"
+                  value={newLibName}
+                  onChange={(e) => setNewLibName(e.target.value)}
+                  placeholder="例如：电影"
+                  className="w-full border rounded px-3 py-2 text-sm"
+                />
+              </div>
+              <div>
+                <label className="block text-sm text-gray-600 mb-1">文件夹路径</label>
+                <input
+                  type="text"
+                  value={newLibPath}
+                  onChange={(e) => setNewLibPath(e.target.value)}
+                  placeholder="例如：/Volumes/媒体/电影"
+                  className="w-full border rounded px-3 py-2 text-sm"
+                />
+              </div>
+              <div>
+                <label className="block text-sm text-gray-600 mb-1">类型</label>
+                <select
+                  value={newLibType}
+                  onChange={(e) => setNewLibType(e.target.value)}
+                  className="w-full border rounded px-3 py-2 text-sm"
+                >
+                  <option value="mixed">混合</option>
+                  <option value="movies">电影</option>
+                  <option value="series">剧集</option>
+                </select>
+              </div>
+            </div>
+            <div className="flex justify-end gap-2 mt-6">
+              <button
+                onClick={() => setShowAddModal(false)}
+                className="px-4 py-2 border rounded text-sm hover:bg-gray-50"
+              >
+                取消
+              </button>
+              <button
+                onClick={handleCreateLibrary}
+                disabled={createLibrary.isPending}
+                className="px-4 py-2 bg-blue-600 text-white rounded text-sm hover:bg-blue-700 disabled:opacity-50"
+              >
+                {createLibrary.isPending ? "添加中..." : "添加"}
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>

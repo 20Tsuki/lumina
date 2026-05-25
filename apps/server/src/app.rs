@@ -61,6 +61,9 @@ fn files_routes() -> Router<Arc<AppState>> {
 
 fn library_routes() -> Router<Arc<AppState>> {
     Router::new()
+        .route("/", axum::routing::get(crate::modules::library::handler::list_libraries))
+        .route("/", axum::routing::post(crate::modules::library::handler::create_library))
+        .route("/{id}", axum::routing::delete(crate::modules::library::handler::delete_library))
         .route("/scan", axum::routing::post(crate::modules::library::handler::scan))
         .route("/status", axum::routing::get(crate::modules::library::handler::scan_status))
 }
