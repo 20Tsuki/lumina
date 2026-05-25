@@ -12,7 +12,6 @@ pub struct AppState {
     pub config: Config,
     pub pool: SqlitePool,
     pub scan_state: Arc<ScanState>,
-    #[allow(dead_code)]
     pub download_state: Arc<DownloadState>,
 }
 

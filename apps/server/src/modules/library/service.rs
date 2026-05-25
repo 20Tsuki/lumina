@@ -9,6 +9,7 @@ pub async fn trigger_scan(
     pool: &SqlitePool,
     library_id: i64,
     scan_state: Arc<ScanState>,
+    thumb_dir: String,
 ) -> Result<(), AppError> {
     let library = sqlx::query_as::<_, Library>("SELECT * FROM libraries WHERE id = ?")
         .bind(library_id)
@@ -19,7 +20,7 @@ pub async fn trigger_scan(
 
     let pool_clone = pool.clone();
     tokio::spawn(async move {
-        if let Err(e) = scanner::scan_library(&pool_clone, &library, scan_state).await {
+        if let Err(e) = scanner::scan_library(&pool_clone, &library, scan_state, &thumb_dir).await {
             tracing::error!("scan error: {}", e);
         }
     });

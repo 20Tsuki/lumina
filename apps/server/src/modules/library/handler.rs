@@ -17,7 +17,8 @@ pub async fn scan(
         .map_err(|e| AppError::Internal(e.to_string()))?;
 
     for lib in &libraries {
-        service::trigger_scan(&state.pool, lib.id, state.scan_state.clone()).await?;
+        let thumb_dir = state.config.thumbnail_dir().to_string_lossy().to_string();
+        service::trigger_scan(&state.pool, lib.id, state.scan_state.clone(), thumb_dir).await?;
     }
 
     Ok(Json(serde_json::json!({"ok": true})))

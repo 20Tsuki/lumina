@@ -39,6 +39,7 @@ pub async fn pause(
     State(state): State<Arc<AppState>>,
     Path(id): Path<i64>,
 ) -> Result<Json<serde_json::Value>, AppError> {
+    state.download_state.cancel_task(id).await;
     service::pause_task(&state.pool, id).await?;
     Ok(Json(serde_json::json!({"ok": true})))
 }

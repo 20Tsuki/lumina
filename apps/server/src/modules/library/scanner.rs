@@ -1,5 +1,6 @@
 use std::fs;
 use std::path::Path;
+use std::process::Command;
 use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
 use std::sync::Arc;
 
@@ -28,7 +29,7 @@ impl ScanState {
     }
 }
 
-pub async fn scan_library(pool: &SqlitePool, library: &Library, state: Arc<ScanState>) -> Result<(), AppError> {
+pub async fn scan_library(pool: &SqlitePool, library: &Library, state: Arc<ScanState>, thumb_dir: &str) -> Result<(), AppError> {
     if state.running.swap(true, Ordering::SeqCst) {
         return Err(AppError::Conflict("scan already running".into()));
     }
@@ -37,7 +38,7 @@ pub async fn scan_library(pool: &SqlitePool, library: &Library, state: Arc<ScanS
     state.total.store(0, Ordering::SeqCst);
     state.processed.store(0, Ordering::SeqCst);
 
-    let result = do_scan(pool, library, &state).await;
+    let result = do_scan(pool, library, &state, thumb_dir).await;
 
     if result.is_err() {
         *state.status.lock() = "error".into();
@@ -48,7 +49,7 @@ pub async fn scan_library(pool: &SqlitePool, library: &Library, state: Arc<ScanS
     result
 }
 
-async fn do_scan(pool: &SqlitePool, library: &Library, state: &Arc<ScanState>) -> Result<(), AppError> {
+async fn do_scan(pool: &SqlitePool, library: &Library, state: &Arc<ScanState>, thumb_dir: &str) -> Result<(), AppError> {
     let mut files = Vec::new();
     walk_dir(Path::new(&library.path), Path::new(&library.path), &mut files)?;
 
@@ -81,9 +82,139 @@ async fn do_scan(pool: &SqlitePool, library: &Library, state: &Arc<ScanState>) -
         .execute(pool)
         .await
         .map_err(|e| AppError::Internal(e.to_string()))?;
+
+        // Extract metadata for video files
+        if file_type == "video" {
+            let full_path = Path::new(&library.path).join(relative_path);
+            let file_id: i64 = sqlx::query_scalar(
+                "SELECT id FROM indexed_files WHERE library_id = ? AND file_path = ?"
+            )
+            .bind(library.id)
+            .bind(relative_path)
+            .fetch_one(pool)
+            .await
+            .map_err(|e| AppError::Internal(e.to_string()))?;
+
+            if let Some(meta) = extract_metadata(&full_path, thumb_dir) {
+                let thumb_path = if let Some(ref thumb) = meta.thumb_rel {
+                    Some(thumb.clone())
+                } else {
+                    None
+                };
+                let _ = sqlx::query(
+                    "UPDATE indexed_files SET codec = ?, resolution = ?, duration = ?, bitrate = ?, thumb_path = ?, metadata_json = ? WHERE id = ?"
+                )
+                .bind(&meta.codec)
+                .bind(&meta.resolution)
+                .bind(meta.duration)
+                .bind(meta.bitrate)
+                .bind(&thumb_path)
+                .bind(&meta.metadata_json)
+                .bind(file_id)
+                .execute(pool)
+                .await;
+            }
+        }
     }
 
     Ok(())
+}
+
+struct VideoMeta {
+    codec: Option<String>,
+    resolution: Option<String>,
+    duration: Option<i64>,
+    bitrate: Option<i64>,
+    metadata_json: Option<String>,
+    thumb_rel: Option<String>,
+}
+
+fn extract_metadata(file_path: &Path, thumb_dir: &str) -> Option<VideoMeta> {
+    let output = Command::new("ffprobe")
+        .args([
+            "-v", "quiet",
+            "-print_format", "json",
+            "-show_format",
+            "-show_streams",
+        ])
+        .arg(file_path)
+        .output()
+        .ok()?;
+
+    if !output.status.success() {
+        return None;
+    }
+
+    let json_str = String::from_utf8_lossy(&output.stdout);
+    let parsed: serde_json::Value = serde_json::from_str(&json_str).ok()?;
+
+    let streams = parsed["streams"].as_array()?;
+    let video_stream = streams.iter().find(|s| s["codec_type"].as_str() == Some("video"));
+
+    let codec = video_stream.and_then(|s| s["codec_name"].as_str()).map(String::from);
+    let resolution = video_stream.and_then(|s| {
+        let w = s["width"].as_i64()?;
+        let h = s["height"].as_i64()?;
+        Some(format!("{}x{}", w, h))
+    });
+
+    let duration = parsed["format"]["duration"]
+        .as_str()
+        .and_then(|d| d.parse::<f64>().ok())
+        .map(|d| d as i64);
+
+    let bitrate = parsed["format"]["bit_rate"]
+        .as_str()
+        .and_then(|b| b.parse::<i64>().ok());
+
+    // Generate thumbnail
+    let thumb_rel = generate_thumbnail(file_path, thumb_dir);
+
+    Some(VideoMeta {
+        codec,
+        resolution,
+        duration,
+        bitrate,
+        metadata_json: Some(json_str.to_string()),
+        thumb_rel,
+    })
+}
+
+fn generate_thumbnail(file_path: &Path, thumb_dir: &str) -> Option<String> {
+    // Use MD5 of path as thumbnail filename
+    let hash = format!("{:x}", md5::compute(file_path.to_string_lossy().as_bytes()));
+    let thumb_name = format!("{}.jpg", hash);
+
+    let thumb_dir_path = Path::new(thumb_dir);
+    let thumb_path = thumb_dir_path.join(&thumb_name);
+
+    if thumb_path.exists() {
+        return Some(thumb_name);
+    }
+
+    fs::create_dir_all(&thumb_dir).ok()?;
+
+    let status = Command::new("ffmpeg")
+        .args([
+            "-ss", "10",
+            "-i",
+        ])
+        .arg(file_path)
+        .args([
+            "-vframes", "1",
+            "-vf", "scale=320:180",
+            "-y",
+        ])
+        .arg(&thumb_path)
+        .output()
+        .ok()
+        .map(|o| o.status.success())?;
+
+    if status {
+        Some(thumb_name)
+    } else {
+        None
+    }
 }
 
 fn walk_dir(root: &Path, dir: &Path, files: &mut Vec<(String, i64)>) -> Result<(), AppError> {

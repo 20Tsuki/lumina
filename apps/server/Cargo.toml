@@ -29,3 +29,4 @@ futures = "0.3"
 async-stream = "0.3"
 anyhow = "1"
 async-trait = "0.1"
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "stream"] }

@@ -31,7 +31,14 @@ async fn main() -> anyhow::Result<()> {
 
     let scan_state = modules::library::scanner::ScanState::new();
     let download_state = modules::download::service::DownloadState::new();
-    let state = app::AppState::new(config, pool, scan_state, download_state);
+    let state = app::AppState::new(config, pool, scan_state, download_state.clone());
+
+    // Spawn download worker
+    let worker_pool = state.pool.clone();
+    let worker_state = download_state.clone();
+    tokio::spawn(async move {
+        modules::download::client::run_worker(worker_pool, worker_state).await;
+    });
 
     let listener = tokio::net::TcpListener::bind(state.config.server_addr()).await?;
     tracing::info!("listening on {}", state.config.server_addr());
