@@ -39,7 +39,12 @@ pub async fn pause(
     State(state): State<Arc<AppState>>,
     Path(id): Path<i64>,
 ) -> Result<Json<serde_json::Value>, AppError> {
-    state.download_state.cancel_task(id).await;
+    // If aria2 handles this task, pause via aria2 RPC
+    if let Some(gid) = state.download_state.aria2.gid_map.lock().await.get(&id).cloned() {
+        let _ = state.download_state.aria2.pause(&gid).await;
+    } else {
+        state.download_state.cancel_task(id).await;
+    }
     service::pause_task(&state.pool, id).await?;
     Ok(Json(serde_json::json!({"ok": true})))
 }
@@ -48,6 +53,10 @@ pub async fn resume(
     State(state): State<Arc<AppState>>,
     Path(id): Path<i64>,
 ) -> Result<Json<serde_json::Value>, AppError> {
+    // If aria2 handles this task, resume via aria2 RPC
+    if let Some(gid) = state.download_state.aria2.gid_map.lock().await.get(&id).cloned() {
+        let _ = state.download_state.aria2.unpause(&gid).await;
+    }
     service::resume_task(&state.pool, id).await?;
     Ok(Json(serde_json::json!({"ok": true})))
 }
@@ -56,6 +65,10 @@ pub async fn remove(
     State(state): State<Arc<AppState>>,
     Path(id): Path<i64>,
 ) -> Result<Json<serde_json::Value>, AppError> {
+    // If aria2 handles this task, remove via aria2 RPC
+    if let Some(gid) = state.download_state.aria2.gid_map.lock().await.remove(&id) {
+        let _ = state.download_state.aria2.remove(&gid).await;
+    }
     service::remove_task(&state.pool, id).await?;
     Ok(Json(serde_json::json!({"ok": true})))
 }

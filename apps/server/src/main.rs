@@ -30,7 +30,12 @@ async fn main() -> anyhow::Result<()> {
     }
 
     let scan_state = modules::library::scanner::ScanState::new();
-    let download_state = modules::download::service::DownloadState::new();
+
+    // Start aria2c if available (for BT/magnet downloads)
+    let aria2 = modules::download::aria2::Aria2Manager::new(6800, "lumina");
+    aria2.start().await;
+
+    let download_state = modules::download::service::DownloadState::new(aria2);
     let state = app::AppState::new(config, pool, scan_state, download_state.clone());
 
     // Spawn download worker

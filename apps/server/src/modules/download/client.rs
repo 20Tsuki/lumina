@@ -8,9 +8,19 @@ use tokio::fs;
 use tokio::io::AsyncWriteExt;
 
 use crate::models::download::DownloadTask;
+use crate::modules::download::aria2::Aria2Manager;
 use crate::modules::download::service;
 
 pub async fn run_worker(pool: SqlitePool, state: Arc<service::DownloadState>) {
+    // Spawn aria2 progress sync if aria2 is available
+    if state.aria2.is_available() {
+        let sync_pool = pool.clone();
+        let sync_state = state.clone();
+        tokio::spawn(async move {
+            aria2_progress_sync(sync_pool, sync_state).await;
+        });
+    }
+
     loop {
         let task = sqlx::query_as::<_, DownloadTask>(
             "SELECT * FROM download_tasks WHERE status = 'queued' ORDER BY created_at ASC LIMIT 1",
@@ -20,7 +30,13 @@ pub async fn run_worker(pool: SqlitePool, state: Arc<service::DownloadState>) {
 
         match task {
             Ok(Some(task)) => {
-                download_one(&pool, &state, task).await;
+                if state.aria2.is_available() {
+                    download_via_aria2(&pool, &state, task).await;
+                } else if Aria2Manager::is_magnet_or_torrent(&task.url) {
+                    let _ = service::fail_task(&pool, task.id, "aria2 not available — install aria2c for BT/magnet support").await;
+                } else {
+                    download_via_http(&pool, &state, task).await;
+                }
             }
             _ => {
                 tokio::time::sleep(std::time::Duration::from_secs(1)).await;
@@ -29,7 +45,101 @@ pub async fn run_worker(pool: SqlitePool, state: Arc<service::DownloadState>) {
     }
 }
 
-async fn download_one(pool: &SqlitePool, state: &service::DownloadState, task: DownloadTask) {
+async fn download_via_aria2(
+    pool: &SqlitePool,
+    state: &service::DownloadState,
+    task: DownloadTask,
+) {
+    let now = chrono::Utc::now().timestamp_millis();
+    let _ = sqlx::query(
+        "UPDATE download_tasks SET status = 'downloading', updated_at = ? WHERE id = ?",
+    )
+    .bind(now)
+    .bind(task.id)
+    .execute(pool)
+    .await;
+
+    match state.aria2.add_uri(&task.url, &task.save_path).await {
+        Ok(gid) => {
+            state.aria2.gid_map.lock().await.insert(task.id, gid);
+            tracing::info!(task_id = task.id, "aria2 download started");
+        }
+        Err(e) => {
+            tracing::error!(task_id = task.id, %e, "aria2 add_uri failed");
+            let _ = service::fail_task(pool, task.id, &e).await;
+        }
+    }
+}
+
+/// Background loop: poll aria2 statuses and sync to DB
+async fn aria2_progress_sync(pool: SqlitePool, state: Arc<service::DownloadState>) {
+    loop {
+        tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+
+        let gid_map = state.aria2.gid_map.lock().await.clone();
+        if gid_map.is_empty() {
+            continue;
+        }
+
+        // Poll active, waiting, stopped
+        let active = state.aria2.tell_active().await.unwrap_or_default();
+        let waiting = state.aria2.tell_waiting().await.unwrap_or_default();
+
+        let all: Vec<_> = active.into_iter().chain(waiting).collect();
+
+        for (task_id, gid) in &gid_map {
+            if let Some(status) = all.iter().find(|s| &s.gid == gid) {
+                let s = status;
+                let progress = s.progress();
+                let speed = s.speed_bytes();
+                let size = s.total_bytes();
+                let eta = s.eta();
+                let mapped = s.mapped_status();
+
+                // Update file_name from aria2
+                if let Some(ref name) = s.file_name() {
+                    let now = chrono::Utc::now().timestamp_millis();
+                    let _ = sqlx::query(
+                        "UPDATE download_tasks SET file_name = ?, updated_at = ? WHERE id = ? AND file_name IS NULL",
+                    )
+                    .bind(name)
+                    .bind(now)
+                    .bind(task_id)
+                    .execute(&pool)
+                    .await;
+                }
+
+                // Update progress
+                let _ = service::update_progress(&pool, *task_id, progress, speed, size, eta).await;
+
+                // Handle terminal states
+                if mapped == "completed" || mapped == "failed" {
+                    if mapped == "completed" {
+                        let _ = service::complete_task(&pool, *task_id).await;
+                    } else if let Some(ref err) = s.error_message {
+                        let _ = service::fail_task(&pool, *task_id, err).await;
+                    }
+                    // Keep GID for a bit, then clean up
+                }
+
+                // Handle BT metadata phase: if waiting and has followedBy, update GID
+                if s.status == "waiting" && s.followed_by.as_ref().map_or(false, |v| !v.is_empty()) {
+                    if let Some(ref followed) = s.followed_by {
+                        if let Some(new_gid) = followed.first() {
+                            state.aria2.gid_map.lock().await.insert(*task_id, new_gid.clone());
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+async fn download_via_http(
+    pool: &SqlitePool,
+    state: &service::DownloadState,
+    task: DownloadTask,
+) {
     let task_id = task.id;
     let cancel_flag = state.register_task(task_id).await;
 
@@ -42,7 +152,7 @@ async fn download_one(pool: &SqlitePool, state: &service::DownloadState, task: D
     .execute(pool)
     .await;
 
-    let result = execute_download(pool, &task, &cancel_flag).await;
+    let result = execute_http(pool, &task, &cancel_flag).await;
 
     state.unregister_task(task_id).await;
 
@@ -62,7 +172,7 @@ async fn download_one(pool: &SqlitePool, state: &service::DownloadState, task: D
     }
 }
 
-async fn execute_download(
+async fn execute_http(
     pool: &SqlitePool,
     task: &DownloadTask,
     cancel_flag: &Arc<std::sync::atomic::AtomicBool>,
@@ -78,14 +188,12 @@ async fn execute_download(
         .build()
         .map_err(|e| format!("client: {}", e))?;
 
-    // Determine file name from URL
     let file_name = Path::new(url)
         .file_name()
         .and_then(|n| n.to_str())
         .unwrap_or("download");
     let file_path = save_dir.join(file_name);
 
-    // Check for partial download (for resume)
     let mut downloaded: u64 = 0;
     if file_path.exists() {
         if let Ok(meta) = fs::metadata(&file_path).await {
@@ -109,7 +217,6 @@ async fn execute_download(
     }
 
     let total_size = if downloaded > 0 {
-        // For resumed downloads, parse Content-Range for total size
         response
             .headers()
             .get("Content-Range")
@@ -121,7 +228,6 @@ async fn execute_download(
         response.content_length().unwrap_or(0)
     };
 
-    // Update file name in DB if we got a Content-Disposition header
     if let Some(cd) = response
         .headers()
         .get("Content-Disposition")
@@ -162,7 +268,6 @@ async fn execute_download(
             .map_err(|e| format!("write: {}", e))?;
         downloaded += chunk.len() as u64;
 
-        // Update progress every 500ms
         if last_update.elapsed().as_millis() >= 500 {
             let elapsed = start.elapsed().as_secs_f64();
             let speed = if elapsed > 0.0 {
@@ -180,22 +285,12 @@ async fn execute_download(
             } else {
                 0
             };
-            let _ = service::update_progress(
-                pool,
-                task.id,
-                progress,
-                speed,
-                total_size as i64,
-                eta,
-            )
-            .await;
+            let _ = service::update_progress(pool, task.id, progress, speed, total_size as i64, eta).await;
             last_update = Instant::now();
         }
     }
 
-    // Final progress update
     let _ = service::update_progress(pool, task.id, 100.0, 0, total_size as i64, 0).await;
-
     Ok(())
 }
 
