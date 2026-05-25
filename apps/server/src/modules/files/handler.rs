@@ -136,7 +136,7 @@ pub async fn thumbnail(
     Query(q): Query<ThumbnailQuery>,
 ) -> Result<impl IntoResponse, AppError> {
     let root = get_media_root(&state);
-    let thumb = service::generate_thumbnail(&root, &q.path, q.size.unwrap_or(256), &state.config.thumbnail_dir())?;
+    let thumb = service::generate_thumbnail(&root, &q.path, q.size.unwrap_or(256), state.config.thumbnail_dir())?;
     let file = tokio::fs::File::open(&thumb).await.map_err(|e| AppError::NotFound(e.to_string()))?;
     let stream = tokio_util::io::ReaderStream::new(file);
     Ok(([(header::CONTENT_TYPE, "image/jpeg")], Body::from_stream(stream)))

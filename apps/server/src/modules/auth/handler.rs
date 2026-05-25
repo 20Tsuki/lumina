@@ -39,7 +39,7 @@ pub async fn login(
         user.id,
         &user.username,
         &user.role,
-        &state.config.jwt_secret(),
+        state.config.jwt_secret(),
         state.config.jwt_expiry_hours(),
     )?;
 

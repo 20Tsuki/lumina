@@ -35,7 +35,7 @@ impl FromRequestParts<Arc<AppState>> for AuthClaims {
                 )
             })?;
 
-        let claims = service::verify_token(header, &state.config.jwt_secret()).map_err(
+        let claims = service::verify_token(header, state.config.jwt_secret()).map_err(
             |_| {
                 (
                     StatusCode::UNAUTHORIZED,

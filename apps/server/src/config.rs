@@ -1,7 +1,7 @@
 use serde::Deserialize;
 use std::path::PathBuf;
 
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Default, Deserialize)]
 pub struct Config {
     #[serde(default)]
     pub server: ServerConfig,
@@ -68,16 +68,6 @@ pub fn load() -> anyhow::Result<Config> {
     if let Ok(db) = std::env::var("LUMINA_DB_PATH") { config.data.db_path = db.into(); }
     if let Ok(secret) = std::env::var("LUMINA_JWT_SECRET") { config.auth.jwt_secret = secret; }
     Ok(config)
-}
-
-impl Default for Config {
-    fn default() -> Self {
-        Config {
-            server: ServerConfig::default(),
-            data: DataConfig::default(),
-            auth: AuthConfig::default(),
-        }
-    }
 }
 
 impl Default for ServerConfig {

@@ -96,11 +96,7 @@ async fn do_scan(pool: &SqlitePool, library: &Library, state: &Arc<ScanState>, t
             .map_err(|e| AppError::Internal(e.to_string()))?;
 
             if let Some(meta) = extract_metadata(&full_path, thumb_dir) {
-                let thumb_path = if let Some(ref thumb) = meta.thumb_rel {
-                    Some(thumb.clone())
-                } else {
-                    None
-                };
+                let thumb_path = meta.thumb_rel.clone();
                 let _ = sqlx::query(
                     "UPDATE indexed_files SET codec = ?, resolution = ?, duration = ?, bitrate = ?, thumb_path = ?, metadata_json = ? WHERE id = ?"
                 )
@@ -192,7 +188,7 @@ fn generate_thumbnail(file_path: &Path, thumb_dir: &str) -> Option<String> {
         return Some(thumb_name);
     }
 
-    fs::create_dir_all(&thumb_dir).ok()?;
+    fs::create_dir_all(thumb_dir).ok()?;
 
     let status = Command::new("ffmpeg")
         .args([

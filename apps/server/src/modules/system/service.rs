@@ -15,16 +15,19 @@ pub fn get_system_info() -> serde_json::Value {
     let mem_total = sys.total_memory();
     let mem_used = sys.used_memory();
 
-    let mut disk_total = 0u64;
-    let mut disk_used = 0u64;
-    #[cfg(not(target_os = "linux"))]
-    {
-        let disks = sysinfo::Disks::new_with_refreshed_list();
-        if let Some(disk) = disks.first() {
-            disk_total = disk.total_space();
-            disk_used = disk.total_space() - disk.available_space();
+    let (disk_total, disk_used) = {
+        #[cfg(not(target_os = "linux"))]
+        {
+            let disks = sysinfo::Disks::new_with_refreshed_list();
+            if let Some(disk) = disks.first() {
+                (disk.total_space(), disk.total_space() - disk.available_space())
+            } else {
+                (0, 0)
+            }
         }
-    }
+        #[cfg(target_os = "linux")]
+        (0, 0)
+    };
 
     serde_json::json!({
         "cpu_usage": cpu,

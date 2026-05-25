@@ -28,7 +28,7 @@ async fn run_migrations(pool: &SqlitePool) -> anyhow::Result<()> {
     let migrations_dir = concat!(env!("CARGO_MANIFEST_DIR"), "/src/db/migrations");
     let mut entries: Vec<_> = fs::read_dir(migrations_dir)?
         .filter_map(|e| e.ok())
-        .filter(|e| e.path().extension().map_or(false, |ext| ext == "sql"))
+        .filter(|e| e.path().extension().is_some_and(|ext| ext == "sql"))
         .collect();
     entries.sort_by_key(|e| e.file_name());
 

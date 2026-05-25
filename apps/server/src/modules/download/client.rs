@@ -305,7 +305,7 @@ async fn execute_http(
             .headers()
             .get("Content-Range")
             .and_then(|v| v.to_str().ok())
-            .and_then(|v| v.split('/').last())
+            .and_then(|v| v.split('/').next_back())
             .and_then(|s| s.parse().ok())
             .unwrap_or(0)
     } else {
